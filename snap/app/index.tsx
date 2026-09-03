@@ -1,113 +1,48 @@
-import PhotoPreview from '@/components/PhotoPreview';
-import { CameraView, CameraType, useCameraPermissions, CameraCapturedPicture } from 'expo-camera';
-import { useRef, useState } from 'react';
-import { Button, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { Redirect } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+import { setAccessToken } from '@/lib/api';
 
-export default function App() {
-    const [facing, setFacing] = useState<CameraType>('back');
-    const [permission, requestPermission] = useCameraPermissions();
-    const cameraViewRef = useRef<CameraView | null>(null)
-    const [cameraReady, setCameraReady] = useState(false)
-    const [takenPhoto, setTakenPhoto] = useState<CameraCapturedPicture>()
+// Nyckeln vi sparar access-token under i SecureStore. Samma sträng i login/register.
+const TOKEN_KEY = 'accessToken';
 
-    const lastTapTimeRef = useRef<number | null>(null);
-
-    const handleTap = () => {
-        const now = new Date().getTime();
-        const DOUBLE_TAP_DELAY = 300; // Adjust as needed for your use case (in milliseconds)
-
-        const isDoubleTap = lastTapTimeRef.current && (now - lastTapTimeRef.current) < DOUBLE_TAP_DELAY
-
-        if (isDoubleTap) {
-            toggleCameraFacing()
-        } else {
-            // Single tap detected
-            console.log('Single tap!');
-        }
-
-        lastTapTimeRef.current = now;
-    };
-
-    if (!permission) {
-        // Camera permissions are still loading.
-        return <View />;
-    }
-
-    if (takenPhoto) {
-        return (
-            <PhotoPreview photoUri={takenPhoto.uri} discard={() => setTakenPhoto(undefined)} />
-        )
-    }
-
-    if (!permission.granted) {
-        // Camera permissions are not granted yet.
-        return (
-            <View style={styles.container}>
-                <Text style={styles.message}>We need your permission to show the camera</Text>
-                <Button onPress={requestPermission} title="grant permission" />
-            </View>
-        );
-    }
-
-    function toggleCameraFacing() {
-        setFacing(current => (current === 'back' ? 'front' : 'back'));
-    }
-
-    const takePhoto = async () => {
-        if (!cameraReady) return
-
-        const photo = await cameraViewRef.current?.takePictureAsync()
-        setTakenPhoto(photo)
-    }
-
-    return (
-        <View style={styles.container}>
-            <TouchableOpacity style={{ flex: 1 }} onPress={handleTap}>
-                <CameraView ref={cameraViewRef} onCameraReady={() => setCameraReady(true)} style={styles.camera} facing={facing} />
-            </TouchableOpacity>
-
-
-            {cameraReady && <View style={styles.buttonContainer}>
-                <TouchableOpacity style={styles.button} onPress={takePhoto}>
-                </TouchableOpacity>
-            </View>}
-
-        </View>
-    );
+// Loggar ut: nollar mockens minne och raderar den sparade token.
+// Exporteras så en knapp kan använda den senare.
+export async function logout() {
+  setAccessToken(null);
+  await SecureStore.deleteItemAsync(TOKEN_KEY);
 }
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        justifyContent: 'center',
-    },
-    message: {
-        textAlign: 'center',
-        paddingBottom: 10,
-    },
-    camera: {
-        flex: 1,
-    },
-    buttonContainer: {
-        position: 'absolute',
-        bottom: 64,
-        flexDirection: 'row',
-        justifyContent: 'center',
-        width: '100%',
-        paddingHorizontal: 64,
-    },
-    button: {
-        alignItems: 'center',
-        width: 80,
-        height: 80,
-        borderRadius: '50%',
-        backgroundColor: 'transparent',
-        borderColor: '#3338',
-        borderWidth: 4
-    },
-    text: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: 'white',
-    },
-});
+// Startpunkt / auth-gate.
+// Har användaren en sparad token -> läs in den och gå till camera.
+// Annars -> gå till login.
+export default function Index() {
+  const [status, setStatus] = useState<'checking' | 'in' | 'out'>('checking');
+
+  useEffect(() => {
+    (async () => {
+      const token = await SecureStore.getItemAsync(TOKEN_KEY);
+      if (token) {
+        setAccessToken(token);
+        setStatus('in');
+      } else {
+        setStatus('out');
+      }
+    })();
+  }, []);
+
+  if (status === 'checking') {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (status === 'in') {
+    return <Redirect href="/camera" />;
+  }
+
+  return <Redirect href="/login" />;
+}
