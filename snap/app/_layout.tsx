@@ -14,6 +14,11 @@ export default function RootLayout() {
           name="chat"
           options={{ headerShown: false, animation: 'slide_from_right' }}
         />
+        {/* Välj mottagare ligger ovanpå photo preview och glider in från höger. */}
+        <Stack.Screen
+          name="select-recipients"
+          options={{ headerShown: false, animation: 'slide_from_right' }}
+        />
       </Stack>
       <StatusBar style="auto" />
     </GestureHandlerRootView>
