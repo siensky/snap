@@ -1,9 +1,8 @@
-import { Text, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import PhotoPreview from '@/components/PhotoPreview';
 
 export default function PhotoPreviewScreen() {
-  return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <Text>Photo preview</Text>
-    </View>
-  );
+  const { photoUri } = useLocalSearchParams<{ photoUri: string }>();
+
+  return <PhotoPreview photoUri={photoUri} discard={() => router.back()} />;
 }

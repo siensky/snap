@@ -1,5 +1,5 @@
-import PhotoPreview from '@/components/PhotoPreview';
-import { CameraView, CameraType, useCameraPermissions, CameraCapturedPicture } from 'expo-camera';
+import { router } from 'expo-router';
+import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRef, useState } from 'react';
 import { Button, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -8,7 +8,6 @@ export default function App() {
     const [permission, requestPermission] = useCameraPermissions();
     const cameraViewRef = useRef<CameraView | null>(null)
     const [cameraReady, setCameraReady] = useState(false)
-    const [takenPhoto, setTakenPhoto] = useState<CameraCapturedPicture>()
 
     const lastTapTimeRef = useRef<number | null>(null);
 
@@ -33,12 +32,6 @@ export default function App() {
         return <View />;
     }
 
-    if (takenPhoto) {
-        return (
-            <PhotoPreview photoUri={takenPhoto.uri} discard={() => setTakenPhoto(undefined)} />
-        )
-    }
-
     if (!permission.granted) {
         // Camera permissions are not granted yet.
         return (
@@ -50,20 +43,36 @@ export default function App() {
     }
 
     function toggleCameraFacing() {
+        setCameraReady(false)
         setFacing(current => (current === 'back' ? 'front' : 'back'));
     }
 
     const takePhoto = async () => {
         if (!cameraReady) return
 
-        const photo = await cameraViewRef.current?.takePictureAsync()
-        setTakenPhoto(photo)
+        try {
+            const photo = await cameraViewRef.current?.takePictureAsync()
+            if (photo) {
+                router.push({ pathname: '/photo-preview', params: { photoUri: photo.uri } })
+            }
+        } catch (error) {
+            console.log('Failed to take photo:', error)
+        }
     }
 
     return (
         <View style={styles.container}>
             <TouchableOpacity style={{ flex: 1 }} onPress={handleTap}>
-                <CameraView ref={cameraViewRef} onCameraReady={() => setCameraReady(true)} style={styles.camera} facing={facing} />
+                <CameraView
+                    ref={cameraViewRef}
+                    onCameraReady={() => {
+                        console.log('Camera ready')
+                        setCameraReady(true)
+                    }}
+                    onMountError={(error) => console.log('Camera mount error:', error)}
+                    style={styles.camera}
+                    facing={facing}
+                />
             </TouchableOpacity>
 
 
