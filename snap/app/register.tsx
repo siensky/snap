@@ -8,13 +8,12 @@ import {
   View,
 } from 'react-native';
 import { Link, router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { ApiError, register, setAccessToken } from '@/lib/api';
-
-// Samma nyckel som i app/index.tsx.
-const TOKEN_KEY = 'accessToken';
+import { register } from '@/lib/api';
+import { useAuth, useHandleApiError } from '@/lib/auth';
 
 export default function RegisterScreen() {
+  const { signIn } = useAuth();
+  const handleApiError = useHandleApiError();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,12 +26,10 @@ export default function RegisterScreen() {
     setError(null);
     try {
       const res = await register(username, password);
-      await SecureStore.setItemAsync(TOKEN_KEY, res.tokens.access_token);
-      setAccessToken(res.tokens.access_token);
+      await signIn(res.tokens.access_token);
       router.replace('/camera');
     } catch (e) {
-      // ApiError.message är backendens text (t.ex. "User already exists").
-      setError(e instanceof ApiError ? e.message : 'Something went wrong');
+      setError(await handleApiError(e));
     } finally {
       setLoading(false);
     }

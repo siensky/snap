@@ -5,13 +5,16 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ApiError, getFriends, sendSnap, type ApiFriend } from '@/lib/api';
+import { getFriends, sendSnap, type ApiFriend } from '@/lib/api';
+import { useHandleApiError } from '@/lib/auth';
 
 export default function SelectRecipientsScreen() {
+  const handleApiError = useHandleApiError();
   const { photoUri, caption } = useLocalSearchParams<{
     photoUri: string;
     caption?: string;
@@ -19,6 +22,7 @@ export default function SelectRecipientsScreen() {
 
   const [friends, setFriends] = useState<ApiFriend[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [extra, setExtra] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,14 +31,16 @@ export default function SelectRecipientsScreen() {
     (async () => {
       try {
         const all = await getFriends();
+        // Lyckat skick kräver mutual: true — listan visar bara dem.
         setFriends(all.filter((f) => f.mutual));
       } catch (e) {
-        setError(e instanceof ApiError ? e.message : 'Something went wrong');
+        const message = await handleApiError(e);
+        if (message) setError(message);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [handleApiError]);
 
   function toggle(username: string) {
     setSelected((current) => {
@@ -48,8 +54,16 @@ export default function SelectRecipientsScreen() {
     });
   }
 
+  // Extra namn (inte i mutual-listan) så 400 från sendSnap kan triggas.
+  function addExtra() {
+    const name = extra.trim();
+    if (!name) return;
+    setSelected((current) => new Set(current).add(name));
+    setExtra('');
+  }
+
   async function handleSend() {
-    if (selected.size === 0 || !photoUri) return;
+    if (selected.size === 0 || !photoUri || sending) return;
     setSending(true);
     setError(null);
     try {
@@ -61,12 +75,15 @@ export default function SelectRecipientsScreen() {
       router.dismissAll();
       router.navigate('/conversations');
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Something went wrong');
+      const message = await handleApiError(e);
+      if (message) setError(message);
     } finally {
       setSending(false);
     }
   }
 
+  const friendNames = new Set(friends.map((f) => f.username));
+  const extras = Array.from(selected).filter((name) => !friendNames.has(name));
   const canSend = selected.size > 0 && !sending;
 
   return (
@@ -76,6 +93,24 @@ export default function SelectRecipientsScreen() {
       </Pressable>
 
       <Text style={styles.title}>Send to</Text>
+
+      <View style={styles.searchRow}>
+        <TextInput
+          style={styles.search}
+          placeholder="Username"
+          autoCapitalize="none"
+          value={extra}
+          onChangeText={setExtra}
+          editable={!sending}
+        />
+        <Pressable
+          style={[styles.add, (!extra.trim() || sending) && styles.addDisabled]}
+          disabled={!extra.trim() || sending}
+          onPress={addExtra}
+        >
+          <Text style={styles.addText}>Add</Text>
+        </Pressable>
+      </View>
 
       {error && (
         <View style={styles.errorBox}>
@@ -88,15 +123,19 @@ export default function SelectRecipientsScreen() {
       ) : (
         <FlatList
           style={styles.list}
-          data={friends}
-          keyExtractor={(item) => item.username}
+          data={[...friends.map((f) => f.username), ...extras]}
+          keyExtractor={(item) => item}
           renderItem={({ item }) => (
-            <Pressable style={styles.row} onPress={() => toggle(item.username)}>
-              <Text style={styles.name}>{item.username}</Text>
+            <Pressable
+              style={styles.row}
+              onPress={() => toggle(item)}
+              disabled={sending}
+            >
+              <Text style={styles.name}>{item}</Text>
               <View
                 style={[
                   styles.checkbox,
-                  selected.has(item.username) && styles.checkboxChecked,
+                  selected.has(item) && styles.checkboxChecked,
                 ]}
               />
             </Pressable>
@@ -132,6 +171,31 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
+    fontWeight: 'bold',
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  search: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 12,
+  },
+  add: {
+    backgroundColor: '#000',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  addDisabled: {
+    backgroundColor: '#888',
+  },
+  addText: {
+    color: '#fff',
     fontWeight: 'bold',
   },
   errorBox: {

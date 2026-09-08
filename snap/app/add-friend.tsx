@@ -11,33 +11,39 @@ import {
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  ApiError,
   addFriend,
   deleteFriend,
   getFriendRequests,
   searchUsers,
+  type AddFriendResponse,
   type UserSearchResult,
 } from '@/lib/api';
+import { useHandleApiError } from '@/lib/auth';
 
 export default function AddFriendScreen() {
+  const handleApiError = useHandleApiError();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UserSearchResult[]>([]);
   const [requests, setRequests] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Bumpas efter varje ändring för att tvinga om-läsning från mocken.
+  // Senaste addFriend-svaret visas rakt av: 'pending' | 'friends'.
+  const [status, setStatus] = useState<AddFriendResponse['status'] | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+
+  const trimmed = query.trim();
 
   const loadRequests = useCallback(async () => {
     try {
       setRequests(await getFriendRequests());
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Something went wrong');
+      const message = await handleApiError(e);
+      if (message) setError(message);
     }
-  }, []);
+  }, [handleApiError]);
 
-  // Ladda inkommande vänförfrågningar (mount + efter varje ändring).
   useEffect(() => {
     (async () => {
       await loadRequests();
@@ -45,22 +51,21 @@ export default function AddFriendScreen() {
     })();
   }, [loadRequests, reloadKey]);
 
-  // Sök när texten ändras eller efter en ändring. `active` skyddar mot svar
-  // som kommer i fel ordning. Ingen optimistisk lokal state – mocken är källan.
+  // Sök bara när fältet inte är tomt — undvik setState på tom query (lint).
   useEffect(() => {
-    if (query.trim() === '') {
-      setResults([]);
+    if (trimmed === '') {
       return;
     }
     let active = true;
-    setSearching(true);
     (async () => {
+      setSearching(true);
       try {
         const found = await searchUsers(query);
         if (active) setResults(found);
       } catch (e) {
         if (active) {
-          setError(e instanceof ApiError ? e.message : 'Something went wrong');
+          const message = await handleApiError(e);
+          if (message) setError(message);
         }
       } finally {
         if (active) setSearching(false);
@@ -69,39 +74,44 @@ export default function AddFriendScreen() {
     return () => {
       active = false;
     };
-  }, [query, reloadKey]);
+  }, [query, trimmed, reloadKey, handleApiError]);
 
-  // Add <-> Pending. Efter anropet läses allt om från mocken.
-  async function toggleAdd(user: UserSearchResult) {
+  async function handleAdd(username: string) {
     setError(null);
-    try {
-      if (user.requested) {
-        await deleteFriend(user.username);
-      } else {
-        await addFriend(user.username);
-      }
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Something went wrong');
-    } finally {
-      setReloadKey((k) => k + 1);
-    }
-  }
-
-  // Acceptera en förfrågan = lägg till tillbaka. Blir det inte 'friends' fanns
-  // förfrågan inte längre – säg till istället för att låtsas att det gick.
-  async function accept(username: string) {
-    setError(null);
+    setStatus(null);
+    setAdding(true);
     try {
       const res = await addFriend(username);
-      if (res.status !== 'friends') {
-        setError(`Could not accept ${username} — the request is no longer available`);
-      }
+      setStatus(res.status);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Something went wrong');
+      const message = await handleApiError(e);
+      if (!message) return;
+      setError(message);
     } finally {
+      setAdding(false);
       setReloadKey((k) => k + 1);
     }
   }
+
+  async function toggleAdd(user: UserSearchResult) {
+    if (user.requested) {
+      setError(null);
+      setStatus(null);
+      try {
+        await deleteFriend(user.username);
+      } catch (e) {
+        const message = await handleApiError(e);
+        if (!message) return;
+        setError(message);
+      } finally {
+        setReloadKey((k) => k + 1);
+      }
+      return;
+    }
+    await handleAdd(user.username);
+  }
+
+  const visibleResults = trimmed === '' ? [] : results;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -112,17 +122,32 @@ export default function AddFriendScreen() {
         </Pressable>
       </View>
 
-      <TextInput
-        style={styles.search}
-        placeholder="Search users"
-        autoCapitalize="none"
-        value={query}
-        onChangeText={setQuery}
-      />
+      <View style={styles.searchRow}>
+        <TextInput
+          style={styles.search}
+          placeholder="Search users"
+          autoCapitalize="none"
+          value={query}
+          onChangeText={setQuery}
+        />
+        <Pressable
+          style={[styles.action, (!trimmed || adding) && styles.actionMuted]}
+          disabled={!trimmed || adding}
+          onPress={() => handleAdd(trimmed)}
+        >
+          <Text style={styles.actionText}>{adding ? '…' : 'Add'}</Text>
+        </Pressable>
+      </View>
 
       {error && (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
+      {status && (
+        <View style={styles.statusBox}>
+          <Text style={styles.statusText}>{status}</Text>
         </View>
       )}
 
@@ -131,10 +156,10 @@ export default function AddFriendScreen() {
           <Text style={styles.sectionTitle}>Results</Text>
           {searching && <ActivityIndicator />}
         </View>
-        {query.trim() !== '' && !searching && results.length === 0 && (
+        {trimmed !== '' && !searching && visibleResults.length === 0 && (
           <Text style={styles.muted}>No users found</Text>
         )}
-        {results.map((user) => (
+        {visibleResults.map((user) => (
           <View key={user.username} style={styles.row}>
             <Text style={styles.name}>{user.username}</Text>
             <Pressable
@@ -157,7 +182,11 @@ export default function AddFriendScreen() {
           requests.map((username) => (
             <View key={username} style={styles.row}>
               <Text style={styles.name}>{username}</Text>
-              <Pressable style={styles.action} onPress={() => accept(username)}>
+              <Pressable
+                style={[styles.action, adding && styles.actionMuted]}
+                disabled={adding}
+                onPress={() => handleAdd(username)}
+              >
                 <Text style={styles.actionText}>Accept</Text>
               </Pressable>
             </View>
@@ -188,7 +217,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   search: {
+    flex: 1,
     borderWidth: 1,
     borderColor: '#ccc',
     borderRadius: 8,
@@ -201,6 +236,15 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#b00020',
+  },
+  statusBox: {
+    backgroundColor: '#e7f6ec',
+    borderRadius: 8,
+    padding: 12,
+  },
+  statusText: {
+    color: '#0d6b2c',
+    fontWeight: 'bold',
   },
   scroll: {
     gap: 8,

@@ -14,12 +14,21 @@ import Swipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ApiError, getFriends, type ApiFriend } from '@/lib/api';
-import { logout } from '../index';
+import { getFriends, type ApiFriend } from '@/lib/api';
+import { useAuth, useHandleApiError } from '@/lib/auth';
 
-// En rad i listan. Swajpa åt höger -> gå in i chatten med den vännen.
-function FriendRow({ username }: { username: string }) {
+// Mutual-rad: swajpa åt höger -> chat. Pending-rad: ingen chat, annan look.
+function FriendRow({ friend }: { friend: ApiFriend }) {
   const swipeRef = useRef<SwipeableMethods>(null);
+
+  if (!friend.mutual) {
+    return (
+      <View style={[styles.row, styles.pendingRow]}>
+        <Text style={[styles.name, styles.pendingName]}>{friend.username}</Text>
+        <Text style={styles.pendingLabel}>Pending</Text>
+      </View>
+    );
+  }
 
   return (
     <Swipeable
@@ -34,20 +43,22 @@ function FriendRow({ username }: { username: string }) {
         // OBS: direction = swajp-riktningen. Drar man raden åt höger (så att
         // vänster-panelen "Chat" visas) är den RIGHT, inte LEFT.
         if (direction === SwipeDirection.RIGHT) {
-          // Stäng raden så den är återställd när man kommer tillbaka.
           swipeRef.current?.close();
-          router.push({ pathname: '/chat', params: { username } });
+          router.push({ pathname: '/chat', params: { username: friend.username } });
         }
       }}
     >
       <View style={styles.row}>
-        <Text style={styles.name}>{username}</Text>
+        <Text style={styles.name}>{friend.username}</Text>
+        <Text style={styles.friendLabel}>Friends</Text>
       </View>
     </Swipeable>
   );
 }
 
 export default function ConversationsScreen() {
+  const { signOut } = useAuth();
+  const handleApiError = useHandleApiError();
   const [friends, setFriends] = useState<ApiFriend[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,12 +73,10 @@ export default function ConversationsScreen() {
       (async () => {
         try {
           const all = await getFriends();
-          // Bara ömsesidiga vänner blir konversationer.
-          if (active) setFriends(all.filter((f) => f.mutual));
+          if (active) setFriends(all);
         } catch (e) {
-          if (active) {
-            setError(e instanceof ApiError ? e.message : 'Something went wrong');
-          }
+          const message = await handleApiError(e);
+          if (active && message) setError(message);
         } finally {
           if (active) setLoading(false);
         }
@@ -75,13 +84,12 @@ export default function ConversationsScreen() {
       return () => {
         active = false;
       };
-    }, []),
+    }, [handleApiError]),
   );
 
-  // Loggar ut och skickar tillbaka till login.
+  // Loggar ut. Stack.Protected skickar till login när session blir null.
   async function handleLogout() {
-    await logout();
-    router.replace('/login');
+    await signOut();
   }
 
   // Filtrera listan på det som skrivs i sökfältet.
@@ -125,7 +133,7 @@ export default function ConversationsScreen() {
       <FlatList
         data={visible}
         keyExtractor={(item) => item.username}
-        renderItem={({ item }) => <FriendRow username={item.username} />}
+        renderItem={({ item }) => <FriendRow friend={item} />}
         ListEmptyComponent={<Text style={styles.empty}>No friends yet</Text>}
       />
     </SafeAreaView>
@@ -164,6 +172,9 @@ const styles = StyleSheet.create({
   },
   row: {
     backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 16,
     paddingHorizontal: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -171,6 +182,22 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 16,
+  },
+  pendingRow: {
+    backgroundColor: '#f5f5f5',
+  },
+  pendingName: {
+    color: '#888',
+  },
+  pendingLabel: {
+    color: '#888',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  friendLabel: {
+    color: '#0066cc',
+    fontWeight: 'bold',
+    fontSize: 13,
   },
   leftAction: {
     backgroundColor: '#0066cc',
